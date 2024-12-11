@@ -1,0 +1,63 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ zhansayaaa }}
+          password: ${{ zhansaya456 }}
+
+      - name: Build and push Docker image
+        run: |
+          docker build -t my-app:$GITHUB_SHA .
+          docker tag my-app:$GITHUB_SHA your-dockerhub-username/my-app:$GITHUB_SHA
+          docker push your-dockerhub-username/my-app:$GITHUB_SHA
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Install AWS CLI
+        run: |
+          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+          unzip awscliv2.zip
+          sudo ./aws/install
+
+      - name: Configure AWS CLI
+        run: |
+          aws configure set aws_access_key_id ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws configure set aws_secret_access_key ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws configure set region 'us-west-2'
+
+      - name: SSH into EC2 and deploy Docker container
+        run: |
+          echo "${{ secrets.EC2_SSH_PRIVATE_KEY }}" > private_key.pem
+          chmod 600 private_key.pem
+
+          ssh -o StrictHostKeyChecking=no -i private_key.pem ec2-user@your-ec2-public-ip << 'EOF'
+            docker pull your-dockerhub-username/my-app:$GITHUB_SHA
+            
+            docker stop my-app-container || true
+            docker rm my-app-container || true
+
+            docker run -d --name my-app-container -p 80:80 your-dockerhub-username/my-app:$GITHUB_SHA
+          EOF
